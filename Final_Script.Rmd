@@ -1,0 +1,781 @@
+---
+title: "Economic Drivers Of Real Estate Pricing Nationwide"
+author: 'Group 10: Monirul Islam, Eric Korshun, Opal Lynch, Charles Ramirez, Jisoo
+  Pak'
+date: "2024-05-15"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Animating Question
+Which economic event(s), or conditions, are correlated with real estate price fluctuations since the year 2000?
+
+## Additional Questions 
+- Is there a correlation between population growth and changes in home value? 
+  - How does demand fluctuate for single-family homes?
+- Does changes in personal income and consumer spending correlate with changes in home value?
+- How have major events affected population dynamics, housing markets, and economic indicators within affected regions?
+
+### Tidying Datasets 
+Tidying Census Population Estimates data
+``` {r include=FALSE}
+library(tidyverse)
+```
+``` {r}
+# Population Estimates 2000-2010
+pop2000_2010 <- read.csv(("~/Desktop/Weylandt Project (Housing)/Raw Data /Population Estimate 2000_2010.csv")) |> 
+                filter(SEX == 0) |>
+                filter(AGE == 999) |>
+                select(-SEX,-AGE,-DIVISION,-STATE,-ESTIMATESBASE2000,-CENSUS2010POP) |>
+                filter(NAME != 'United States')
+glimpse(pop2000_2010)
+
+
+# Population Estimates 2011-2019
+pop2011_2019 <- read.csv("~/Desktop/Weylandt Project (Housing)/Raw Data /Population Estimates 2010_2019.csv") |>
+                select(-SUMLEV,-DIVISION,-STATE,-CENSUS2010POP,-ESTIMATESBASE2010,-POPESTIMATE2010) |>
+                select(NAME,POPESTIMATE2011:POPESTIMATE2019) |>
+                filter(NAME != 'United States') |>
+                filter(NAME != 'Northeast Region') |>
+                filter(NAME != 'Midwest Region') |>
+                filter(NAME != 'West Region') |>
+                filter(NAME != 'South Region') |>
+                filter(NAME != 'Puerto Rico')
+glimpse(pop2011_2019)
+
+
+# Population Estimates 2020-2023
+pop2020_2023 <- read.csv("~/Desktop/Weylandt Project (Housing)/Raw Data /Population Estimate 2020_2023.csv") |>
+                select(NAME:POPESTIMATE2023) |>
+                filter(NAME != 'United States') |>
+                filter(NAME != 'Northeast Region') |>
+                filter(NAME != 'Midwest Region') |>
+                filter(NAME != 'West Region') |>
+                filter(NAME != 'South Region') |>
+                filter(NAME != 'Puerto Rico') |>
+                filter(NAME != 'New England') |>
+                filter(NAME != 'Middle Atlantic') |>
+                filter(NAME != 'East North Central') |>
+                filter(NAME != 'West North Central') |>
+                filter(NAME != 'South Atlantic') |>
+                filter(NAME != 'East South Central') |>
+                filter(NAME != 'West South Central') |>
+                filter(NAME != 'Mountain') |>
+                filter(NAME != 'Pacific') |>
+                select(-ESTIMATESBASE2020)
+glimpse(pop2020_2023)
+
+
+# Population Estimates of all states from 2000-2023
+pop_estimate <- left_join(pop2000_2010,pop2011_2019,join_by(NAME==NAME)) |> 
+                left_join(pop2020_2023,join_by(NAME==NAME)) |>
+                rename('STATE'=NAME)
+glimpse(pop_estimate)
+
+
+# Separating Region and State to join other data sets 
+region_state <- pop_estimate |>
+                select(REGION,STATE)
+glimpse(region_state)
+
+
+# Population Estimates by Region 
+allRegions_PopEstimates <- pop_estimate |>
+                           select(-STATE) |>
+                           group_by(REGION) |>
+                           summarise_all(mean) |>
+                           pivot_longer(cols = "POPESTIMATE2000":"POPESTIMATE2023",
+                           names_to = c("YearlyPopEstimate"),
+                           values_to = "Population")
+allRegions_PopEstimates$Year <- gsub("POPESTIMATE(\\d{4})", "\\1", allRegions_PopEstimates$YearlyPopEstimate)
+allRegions_PopEstimates <- allRegions_PopEstimates |> select(-YearlyPopEstimate)
+glimpse(allRegions_PopEstimates)
+
+
+# Convert To CSV
+#write.csv(allRegions_PopEstimates, 'allRegions_PopEstimates.csv', row.names=FALSE)
+```
+
+Tidying Zillow Average Home Prices data
+``` {r include=FALSE}
+library(tidyverse)
+```
+``` {r}
+# Original Zillow data  
+Zillow <- read.csv("~/Desktop/Weylandt Project (Housing)/Raw Data /Zillow.csv") |>
+          select(-RegionID,-SizeRank,-RegionType,-StateName) 
+Zillow[is.na(Zillow)] <- 0
+glimpse(Zillow)
+
+
+# Averaging columns horizontally to consolidate values by year 
+years <- 2000:2023
+for (year in years) {
+  monthly_cols <- grep(paste0("X", year), names(Zillow), value = TRUE)
+  Zillow[[paste0(year, "_Yearly_Avg")]] <- rowMeans(Zillow[monthly_cols], na.rm = TRUE)
+}
+
+
+# Zillow data formatted 
+Zillow_new <- Zillow |>
+              select(RegionName,"2000_Yearly_Avg":"2023_Yearly_Avg") |>
+              rename('STATE'=RegionName) |>
+              inner_join(region_state, join_by("STATE"=="STATE")) |> # From Census Population Estimate data 
+              select(REGION,STATE,"2000_Yearly_Avg":"2023_Yearly_Avg")
+glimpse(Zillow_new)
+
+
+# Zillow Average Home Prices by Region 
+allRegions_Zillow <- Zillow_new |>
+                     select(-STATE) |>
+                     group_by(REGION) |>
+                     summarise_all(mean) |>
+                     pivot_longer(cols = "2000_Yearly_Avg":"2023_Yearly_Avg",
+                     names_to = c("Year_Column"),
+                     values_to = "ZillowAvgHomePrice")
+allRegions_Zillow$Year <- gsub("(\\d{4})_Yearly_Avg", "\\1", allRegions_Zillow$Year_Column)
+allRegions_Zillow <- allRegions_Zillow |> select(-Year_Column)
+glimpse(allRegions_Zillow)
+
+
+# Convert to CSV
+#write.csv(allRegions_Zillow, 'allRegions_Zillow.csv', row.names=FALSE) 
+```
+
+Tidying Regional Data from The U.S. Bureau of Economic Analysis (BEA)
+``` {r include=FALSE}
+library(tidyverse) 
+```
+``` {r}
+# Imported BEA Data
+BEA_unclean <- read_csv('~/Desktop/Weylandt Project (Housing)/Raw Data /RegionalData.csv', show_col_types = FALSE)
+glimpse(BEA_unclean)
+
+
+# Disposable Income data extracted from BEA 
+Disposable_Income <- BEA_unclean |> 
+                     filter(LineCode == 6) |> 
+                     select(-c('Description', 'LineCode', 'GeoFips')) |> 
+                     mutate(across('2000':'2022', as.numeric)) |>
+                     pivot_longer(c('2000':'2022'),
+                        names_to = "Year", 
+                        values_to = "Average Disposable Income", 
+                        values_drop_na = FALSE) |>
+                     pivot_wider(names_from = "Year", values_from = "Average Disposable Income")
+colnames(Disposable_Income)[colnames(Disposable_Income) == "GeoName"] <- "STATE"
+glimpse(Disposable_Income)
+
+
+# Consumer Spending data extracted from BEA
+Consumer_Spending <- BEA_unclean |> 
+                     filter(LineCode == 7) |> 
+                     select(-c('Description', 'LineCode', 'GeoFips')) |> 
+                     mutate(across('2000':'2022', as.numeric)) |>
+                     pivot_longer(c('2000':'2022'),
+                        names_to = "Year", 
+                        values_to = "Personal Consumption Expenditures", 
+                        values_drop_na = FALSE) |>
+                     pivot_wider(names_from = "Year", values_from = "Personal Consumption Expenditures")
+colnames(Consumer_Spending)[colnames(Consumer_Spending) == "GeoName"] <- "STATE"
+glimpse(Consumer_Spending)
+
+
+# Disposable Income data by Region
+allRegions_DisposableIncome <- Disposable_Income |>
+                               inner_join(region_state, join_by("STATE"=="STATE")) |> # From Census Population Estimate data 
+                               select(REGION,'2000':'2022') |>
+                               group_by(REGION) |>
+                               summarise_all(mean) |>
+                               pivot_longer(cols = "2000":"2022",
+                               names_to = c("Year_Column"),
+                               values_to = "Disposable_Income")
+allRegions_DisposableIncome$Year <- gsub("POPESTIMATE(\\d{4})", "\\1", allRegions_DisposableIncome$Year_Column)
+allRegions_DisposableIncome <- allRegions_DisposableIncome |> select(-Year_Column)
+glimpse(allRegions_DisposableIncome)
+
+
+# Consumer Spending data by Region
+allRegions_ConsumerSpending <- Consumer_Spending |>
+                               inner_join(region_state, join_by("STATE"=="STATE")) |> # From Census Population Estimate data 
+                               select(REGION,'2000':'2022') |>
+                               group_by(REGION) |>
+                               summarise_all(mean) |>
+                               pivot_longer(cols = "2000":"2022",
+                               names_to = c("Year_Column"),
+                               values_to = "Consumer_Spending")
+allRegions_ConsumerSpending$Year <- gsub("POPESTIMATE(\\d{4})", "\\1", allRegions_ConsumerSpending$Year_Column)
+allRegions_ConsumerSpending <- allRegions_ConsumerSpending |> select(-Year_Column)
+glimpse(allRegions_ConsumerSpending)
+
+
+# Convert to CSV
+#write.csv(allRegions_DisposableIncome, 'allRegions_DisposableIncome.csv', row.names=FALSE)
+#write.csv(allRegions_ConsumerSpending, 'allRegions_ConsumerSpending.csv', row.names=FALSE)
+```
+
+Tidying Sales of Single-Family Homes data 
+``` {r include=FALSE}
+library(tidyverse)
+```
+``` {r}
+# Sales of Single-Family Homes - Northeast Region 
+Northeast_SalesSF <- read_csv('~/Desktop/Weylandt Project (Housing)/Raw Data /New One Family Houses Sold in Northeast Census Region, Thousands, Seasonally Adjusted Annual Rate .csv', show_col_types = FALSE) |>
+                     rename('NorthEast'= HSN1FNE) |>
+                     rename('Year'= DATE) 
+Northeast_SalesSF$Year <- format(Northeast_SalesSF$Year, "%Y")
+Northeast_SalesSF$NorthEast <- round(Northeast_SalesSF$NorthEast * 1000)
+Northeast_Sales_new <- Northeast_SalesSF |>
+                       pivot_wider(names_from = Year, values_from = NorthEast) |>
+                       cbind(REGION = '1') |>
+                       select(REGION, '2000':'2023')
+glimpse(Northeast_Sales_new)
+
+
+# Sales of Single-Family Homes - Midwest Region 
+Midwest_SalesSF <- read_csv('~/Desktop/Weylandt Project (Housing)/Raw Data /New One Family Houses Sold in Midwest Census Region, Thousands, Seasonally Adjusted Annual Rate.csv', show_col_types = FALSE) |>
+                   rename('MidWest'= HSN1FMW) |>
+                   rename('Year'= DATE) 
+Midwest_SalesSF$Year <- format(Midwest_SalesSF$Year, "%Y")
+Midwest_SalesSF$MidWest <- round(Midwest_SalesSF$MidWest * 1000)
+Midwest_Sales_new <- Midwest_SalesSF |> 
+                     pivot_wider(names_from = Year, values_from = MidWest) |>
+                     cbind(REGION = '2') |>
+                     select(REGION, '2000':'2023')
+glimpse(Midwest_Sales_new)
+
+
+# Sales of Single-Family Homes - South Region 
+South_SalesSF <- read_csv("~/Desktop/Weylandt Project (Housing)/Raw Data /New One Family Houses Sold in South Census Region, Thousands, Seasonally Adjusted Annual Rate .csv", show_col_types = FALSE) |>
+                 rename('South'= HSN1FS) |>
+                 rename('Year'= DATE) 
+South_SalesSF$Year <- format(South_SalesSF$Year, "%Y")
+South_SalesSF$South <- round(South_SalesSF$South * 1000)
+South_Sales_new <- South_SalesSF |>
+                   pivot_wider(names_from = Year, values_from = South) |>
+                   cbind(REGION = '3') |>
+                   select(REGION, '2000':'2023')
+glimpse(South_Sales_new)
+
+
+# Sales of Single-Family Homes - West Region 
+West_SalesSF <- read_csv('~/Desktop/Weylandt Project (Housing)/Raw Data /New One Family Houses Sold in West Census Region, Thousands, Seasonally Adjusted Annual Rate .csv', show_col_types = FALSE) |>
+                rename('West'= HSN1FW) |>
+                rename('Year'= DATE) 
+West_SalesSF$Year <- format(West_SalesSF$Year, "%Y")
+West_SalesSF$West <- round(West_SalesSF$West * 1000)
+West_Sales_new <- West_SalesSF |>
+                  pivot_wider(names_from = Year, values_from = West) |>
+                  cbind(REGION = '4') |>
+                  select(REGION, '2000':'2023')
+glimpse(West_Sales_new)
+
+
+# Sales of Single-Family Homes - All Regions 
+allRegions_SalesSFH <- bind_rows(Northeast_Sales_new,Midwest_Sales_new,South_Sales_new,West_Sales_new) |>
+                       pivot_longer(cols = "2000":"2023",
+                       names_to = c("Year_Column"),
+                       values_to = "SFH_Sales")
+allRegions_SalesSFH$Year <- gsub("(\\d{4})_Yearly_Avg", "\\1", allRegions_SalesSFH$Year_Column)
+allRegions_SalesSFH <- allRegions_SalesSFH |> select(-Year_Column)
+glimpse(allRegions_SalesSFH)
+
+
+# Convert to CSV
+#write.csv(allRegions_SalesSFH, 'allRegions_SalesSFH.csv', row.names=FALSE)
+```
+
+### Question 1 
+### Is there a correlation between population growth and changes in home value? 
+``` {r include=FALSE}
+library(tidyverse)
+```
+``` {r}
+allRegions_PopEstimates <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_PopEstimates.csv", show_col_types = FALSE)
+allRegions_Zillow <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_Zillow.csv", show_col_types = FALSE)
+
+
+# Joining All Regions Population Estimates data and All Regions Zillow Average Home Prices data 
+Zillow_PopulationEstimates <- inner_join(allRegions_Zillow,allRegions_PopEstimates, join_by(REGION,Year))
+glimpse(Zillow_PopulationEstimates)
+
+
+# Visualization of "Changes In Home Prices and Population Estimates from 2000-2023" 
+ggplot(Zillow_PopulationEstimates, aes(x=Population, y=ZillowAvgHomePrice, color=Year)) +
+  geom_point() +
+  scale_y_continuous(labels = scales::dollar) +
+  scale_x_continuous(labels = scales::comma) +
+  facet_grid(~REGION, labeller = labeller(REGION = c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West"))) +
+  theme_bw() +
+  theme(legend.position = 'bottom', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Zillow Average Home Price") +
+  xlab("Population Estimates") +
+  ggtitle("Changes In Home Price And Population Estimates (2000-2023)") +
+  scale_color_gradient(low="blue", high="red") +
+  theme(legend.key.width = unit(1.5,'cm'))
+
+
+# Correlation test between Population Estimates and Zillow Average Home Prices
+cor.test(Zillow_PopulationEstimates$ZillowAvgHomePrice,Zillow_PopulationEstimates$Population)
+
+
+# All States Population Estimates 
+All_PopEstimates_longer <- pop_estimate |>
+          pivot_longer(cols = "POPESTIMATE2000":"POPESTIMATE2023",
+          names_to = c("YearlyPopEstimate"),
+          values_to = "Population")
+All_PopEstimates_longer$Year <- gsub("POPESTIMATE(\\d{4})", "\\1", All_PopEstimates_longer$YearlyPopEstimate)
+All_PopEstimates_longer <- All_PopEstimates_longer |> select(-YearlyPopEstimate)
+glimpse(All_PopEstimates_longer)
+# All States Zillow Average Home Prices 
+All_Zillow_Longer <- Zillow_new |>
+          pivot_longer(cols = "2000_Yearly_Avg":"2023_Yearly_Avg",
+                       names_to = c("Year_Column"),
+                       values_to = "ZillowAvgHomePrice")
+All_Zillow_Longer$Year <- gsub("(\\d{4})_Yearly_Avg", "\\1", All_Zillow_Longer$Year_Column)
+All_Zillow_Longer <- All_Zillow_Longer |> select(-Year_Column)
+glimpse(All_Zillow_Longer)
+
+
+# Region 3 - South 
+    All_South_Population <- All_PopEstimates_longer |> filter(REGION == 3)
+    # South Population Visual
+    ggplot(All_South_Population, aes(x=Year,y=Population)) +
+      geom_point(aes(color=STATE)) +
+      scale_y_continuous(labels = scales::comma) +
+      scale_x_discrete(labels = NULL) +
+      facet_wrap(~STATE) +
+      theme(legend.position = 'none') +
+      ggtitle("Changes In South Population Estimates (2000-2023)")
+    # South Population Percent Change 
+    All_SouthPop_PerChg_2000to2023 <- All_South_Population |> 
+          filter(Year %in% c(2000,2023)) |> 
+          group_by(STATE) |>
+          summarise(Percent_Change = (Population[Year == 2023] / Population[Year == 2000] - 1) * 100)
+    All_SouthPop_PerChg_2000to2023
+    
+    All_South_Zillow <- All_Zillow_Longer |> filter(REGION == 3)
+    # South Home Price Visual 
+    ggplot(All_South_Zillow, aes(x=Year,y=ZillowAvgHomePrice)) +
+      geom_point(aes(color=STATE)) +
+      scale_y_continuous(labels = scales::dollar) +
+      scale_x_discrete(labels = NULL) +
+      facet_wrap(~STATE) +
+      theme(legend.position = 'none') +
+      ylab("Zillow Average Home Price") +
+      ggtitle("Changes In South Home Values (2000-2023)")
+    # South Home Price Percent Change 
+    All_SouthZillow_PerChg_2000to2023 <- All_South_Zillow |> 
+          filter(Year %in% c(2000,2023)) |> 
+          group_by(STATE) |>
+          summarise(Percent_Change = (ZillowAvgHomePrice[Year == 2023] / ZillowAvgHomePrice[Year == 2000] - 1) * 100)
+    All_SouthZillow_PerChg_2000to2023
+    
+
+# Region 4 - West
+    All_West_Population <- All_PopEstimates_longer |> filter(REGION == 4)
+    # West Population Visual
+    ggplot(All_West_Population, aes(x=Year,y=Population)) +
+      geom_point(aes(color=STATE)) +
+      scale_y_continuous(labels = scales::comma) +
+      scale_x_discrete(labels = NULL) +
+      facet_wrap(~STATE) +
+      theme(legend.position = 'none') +
+      ggtitle("Changes In West Population Estimates (2000-2023)")
+    # West Population Percent Change 
+    All_WestPop_PerChg_2000to2023 <- All_West_Population |> 
+          filter(Year %in% c(2000,2023)) |> 
+          group_by(STATE) |>
+          summarise(Percent_Change = (Population[Year == 2023] / Population[Year == 2000] - 1) * 100)
+    All_WestPop_PerChg_2000to2023
+    
+    All_West_Zillow <- All_Zillow_Longer |> filter(REGION == 4)
+    # West Home Price Visual 
+    ggplot(All_West_Zillow, aes(x=Year,y=ZillowAvgHomePrice)) +
+      geom_point(aes(color=STATE)) +
+      scale_y_continuous(labels = scales::dollar) +
+      scale_x_discrete(labels = NULL) +
+      facet_wrap(~STATE) +
+      theme(legend.position = 'none') +
+      ylab("Zillow Average Home Price") +
+      ggtitle("Changes In West Home Values (2000-2023)") 
+    # West Home Price Percent Change 
+    All_WestZillow_PerChg_2000to2023 <- All_West_Zillow |> 
+          filter(Year %in% c(2000,2023)) |> 
+          group_by(STATE) |>
+          summarise(Percent_Change = (ZillowAvgHomePrice[Year == 2023] / ZillowAvgHomePrice[Year == 2000] - 1) * 100)
+    All_WestZillow_PerChg_2000to2023
+```
+
+### How does demand fluctuate for single-family homes?
+``` {r include=FALSE}
+library(tidyverse)
+```
+``` {r}
+allRegions_SalesSFH <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_SalesSFH.csv", show_col_types = FALSE)
+
+
+# Visualization of Sales Of Single-Family Homes 
+ggplot(allRegions_SalesSFH, aes(x=Year,y=SFH_Sales,color=REGION)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::comma) +
+  facet_grid(~REGION, labeller = labeller(REGION = c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West"))) +
+  ylab("Single-Family House Sales") +
+  xlab("Years") +
+  ggtitle("Changes In Single-Family House Sales (2000-2023)") +
+  theme_gray() +
+  theme(legend.position = 'none') 
+```
+
+### Question 2
+### Does changes in personal income and consumer spending correlate with changes in home value?
+``` {r include=FALSE}
+library(tidyverse)
+```
+
+#### Disposable Income and Home Value 
+``` {r}
+allRegions_Zillow <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_Zillow.csv", show_col_types = FALSE)
+allRegions_DisposableIncome <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_DisposableIncome.csv", show_col_types = FALSE)
+
+
+# Joining All Regions Zillow Average Home Price data and All Regions Disposable Personal Income data
+Zillow_DisposableIncome=inner_join(allRegions_Zillow,allRegions_DisposableIncome,join_by('REGION','Year'))
+glimpse(Zillow_DisposableIncome)
+
+
+# Visualization of Changes In Home Price And Disposable Income
+ggplot(Zillow_DisposableIncome,aes(x=Disposable_Income,y=ZillowAvgHomePrice,color=Year))+
+  geom_point() + 
+  scale_y_continuous(labels = scales::dollar) +
+  scale_x_continuous(labels = scales::dollar) +
+  facet_grid(~REGION, labeller = labeller(REGION = c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West"))) +
+  theme_bw() +
+  theme(legend.position = 'bottom', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Zillow Average Home Price") +
+  xlab("Disposable Income") +
+  ggtitle("Changes In Home Price And Disposable Income (2000-2022)") +
+  scale_color_gradient(low="blue", high="red") +
+  theme(legend.key.width = unit(1.5,'cm'))
+
+
+# Correlation test between Disposable Income and Zillow Average Home Prices
+cor.test(Zillow_DisposableIncome$Disposable_Income,Zillow_DisposableIncome$ZillowAvgHomePrice)
+
+
+# Permutation test to further test the correlation
+    # Null Distribution - intended to have no relationship by design 
+    replicate(5000, {
+      Zillow_DisposableIncome |>
+        mutate(ZillowAvgHomePrice = sample(ZillowAvgHomePrice)) |>
+        summarize(corr=cor(ZillowAvgHomePrice,Disposable_Income)) |>
+        pull(corr)
+    }) -> T_corr
+    hist(T_corr)
+    
+    # Observed (Same number from the correlation test above)
+    Zillow_DisposableIncome |>
+    #mutate(ZillowAvgHomePrice = sample(ZillowAvgHomePrice)) |>
+    summarize(corr=cor(ZillowAvgHomePrice,Disposable_Income)) |>
+    pull(corr)
+# When the observed is very inconsistent with the null distribution, we can reject the null distribution. The observed data is so unlikely to have occurred if the null were true. 
+```
+
+#### Consumer Spending and Home Value 
+``` {r}    
+allRegions_Zillow <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_Zillow.csv", show_col_types = FALSE)
+allRegions_ConsumerSpending <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_ConsumerSpending.csv", show_col_types = FALSE)
+
+
+# Joining All Regions Zillow Average Home Price data and All Regions Consumer Spending data
+Zillow_ConsumerSpending <- inner_join(allRegions_Zillow,allRegions_ConsumerSpending, join_by('REGION','Year'))
+glimpse(Zillow_ConsumerSpending)
+
+
+# Visualization of Changes In Home Price And Consumer Spending 
+ggplot(Zillow_ConsumerSpending, aes(y=ZillowAvgHomePrice,x=Consumer_Spending,color=Year)) + 
+  geom_point() + 
+  scale_y_continuous(labels = scales::dollar) +
+  scale_x_continuous(labels = scales::dollar) +
+  facet_grid(~REGION, labeller = labeller(REGION = c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West"))) +
+  theme_bw() +
+  theme(legend.position = 'bottom', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Zillow Average Home Price") +
+  xlab("Consumer Spending") +
+  ggtitle("Changes In Home Price And Consumer Spending (2000-2022)") +
+  scale_color_gradient(low="blue", high="red") +
+  theme(legend.key.width = unit(1.5,'cm')) 
+
+
+# Correlation test between Consumer Spending and Zillow Average Home Prices
+cor.test(Zillow_ConsumerSpending$ZillowAvgHomePrice,Zillow_ConsumerSpending$Consumer_Spending)
+
+
+# Permutation test to further test the correlation
+    # Null Distribution - intended to have no relationship by design 
+    replicate(5000, {
+      Zillow_ConsumerSpending |>
+        mutate(ZillowAvgHomePrice = sample(ZillowAvgHomePrice)) |>
+        summarize(corr=cor(ZillowAvgHomePrice,Consumer_Spending)) |>
+        pull(corr)
+    }) -> T_corr
+    hist(T_corr)
+    
+    # Observed (Same number from the correlation test above)
+    Zillow_ConsumerSpending |>
+    #mutate(ZillowAvgHomePrice = sample(ZillowAvgHomePrice)) |>
+    summarize(corr=cor(ZillowAvgHomePrice,Consumer_Spending)) |>
+    pull(corr)
+# When the observed is very inconsistent with the null distribution, we can reject the null distribution. The observed data is so unlikely to have occurred if the null were true. 
+```
+
+### Question 3 
+### How have major events affected population dynamics, housing markets, and economic indicators within affected regions?
+
+#### 2008 Crisis
+``` {r include=FALSE}
+library(tidyverse)
+library(scales)
+library(cowplot)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+```
+``` {r}
+consumerSpending <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_ConsumerSpending.csv", show_col_types = FALSE)
+disposableIncome <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_DisposableIncome.csv", show_col_types = FALSE)
+popEstimates <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_PopEstimates.csv", show_col_types = FALSE)
+salesSFH <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_SalesSFH.csv", show_col_types = FALSE)
+zillowData <- read_csv("~/Desktop/Weylandt Project (Housing)/Project csv files/allRegions_Zillow.csv", show_col_types = FALSE)
+mortgage15 <- read_csv("~/Desktop/Weylandt Project (Housing)/Raw Data /MORTGAGE15US.csv", show_col_types = FALSE)
+mortgage30 <- read_csv("~/Desktop/Weylandt Project (Housing)/Raw Data /MORTGAGE30US.csv", show_col_types = FALSE)
+unemployment<- read_csv("~/Desktop/Weylandt Project (Housing)/Raw Data /UNRATE.csv", show_col_types = FALSE)
+
+
+# Merging all data-sets into one comprehensive data-frame, with emphasis on years 2005 to 2013
+economic_data <- reduce(list(consumerSpending, disposableIncome, popEstimates, salesSFH, zillowData), full_join, by = c("REGION", "Year"))
+economic_data_crisis <- filter(economic_data, Year >= 2005 & Year <= 2013)
+
+
+# Apply region mapping
+region_mapping <- c('1' = 'Northeast', '2' = 'Midwest', '3' = 'South', '4' = 'West')
+economic_data_crisis$REGION <- factor(economic_data_crisis$REGION, levels = names(region_mapping), labels = region_mapping)
+glimpse(economic_data_crisis)
+
+
+# Home Price & Population Trends
+# Create separate data frames for home prices and population
+home_prices <- economic_data_crisis[c("REGION", "Year", "ZillowAvgHomePrice")]
+population <- economic_data_crisis[c("REGION", "Year", "Population")]
+
+
+# Plot home price trends during 2008 crisis
+home_price_plot <- ggplot(home_prices, aes(x = Year, y = ZillowAvgHomePrice, color = factor(REGION))) +
+  geom_line() +
+  labs(title = "Home Price Trends (2005-2013)", y = "Home Price", color = "Region") +
+  theme_minimal() +
+  scale_y_continuous(labels = dollar)  
+home_price_plot
+
+# Home price percent change 2008 crisis
+home_price_percentChange <- home_prices|>
+  group_by(REGION) |>
+  mutate(Previous_ZillowAvgHomePrice = lag(ZillowAvgHomePrice, 1)) |>
+  mutate(Percent_Change=((ZillowAvgHomePrice-Previous_ZillowAvgHomePrice)/Previous_ZillowAvgHomePrice)*100) |>
+  select(-ZillowAvgHomePrice,-Previous_ZillowAvgHomePrice)
+print(home_price_percentChange, n=36)
+
+
+# Plot population trends during 2008 crisis
+population_plot <- ggplot(population, aes(x = Year, y = Population, color = factor(REGION))) +
+  geom_line() +
+  labs(title = "Population Trends (2005-2013)", y = "Population", color = "Region") +
+  theme_minimal() +
+  scale_y_continuous(labels = comma)  
+population_plot
+
+# Population percent change 2008 crisis
+population_percentChange <- population |> 
+  group_by(REGION) |> 
+  mutate(Previous_pop = lag(Population, 1)) |>
+  mutate(Percent_Change=((Population-Previous_pop)/Previous_pop)*100) |>
+  select(-Population,-Previous_pop)
+print(population_percentChange, n=36)
+
+
+# Arrange plots side by side
+multi_panel_plot <- plot_grid(home_price_plot, population_plot, ncol = 2)
+multi_panel_plot
+
+
+# Economic Indicators Over Time (2005-2013)
+ggplot(economic_data_crisis, aes(x = Year)) +
+  geom_line(aes(y = Consumer_Spending, color = "Consumer Spending (USD)")) +
+  geom_line(aes(y = Disposable_Income, color = "Disposable Income (USD)")) +
+  geom_line(aes(y = ZillowAvgHomePrice, color = "Home Prices (USD)")) +
+  facet_wrap(~REGION) +  
+  labs(title = "Economic Indicators Over Time (2005-2013)", y = "Value") +
+  scale_color_manual(values = c("Consumer Spending (USD)" = "blue", 
+                                "Disposable Income (USD)" = "green", 
+                                "Home Prices (USD)" = "red")) +
+  theme_minimal() +
+  guides(color = guide_legend(title = "Indicators")) +
+  scale_y_continuous(labels = comma)
+
+
+# Mortgage rates from 2000-2010
+# Extracting year from the DATE column for merging
+mortgage15$Year <- format(as.Date(mortgage15$DATE), "%Y")
+mortgage30$Year <- format(as.Date(mortgage30$DATE), "%Y")
+
+# Convert Year to numeric for consistency
+mortgage15$Year <- as.numeric(mortgage15$Year)
+mortgage30$Year <- as.numeric(mortgage30$Year)
+
+# Aggregating average yearly mortgage rates before merging
+avg_mortgage15 <- mortgage15 %>%
+  group_by(Year) %>%
+  summarise(AvgMortgage15Rate = mean(MORTGAGE15US))
+
+avg_mortgage30 <- mortgage30 %>%
+  group_by(Year) %>%
+  summarise(AvgMortgage30Rate = mean(MORTGAGE30US))
+
+# Merging mortgage rate data with main economic data
+economic_data_crisis <- economic_data_crisis %>%
+  left_join(avg_mortgage15, by = "Year") %>%
+  left_join(avg_mortgage30, by = "Year")
+
+# Filtering mortgage data from 2000 to 2010
+mortgage15_filtered <- filter(mortgage15, Year >= 2000 & Year <= 2010)
+mortgage30_filtered <- filter(mortgage30, Year >= 2000 & Year <= 2010)
+
+# Plotting the mortgage rate trends from 2000 to 2010
+mortgage_rate_plot <- ggplot() +
+  geom_line(data = mortgage15_filtered, aes(x = DATE, y = MORTGAGE15US, color = "15-Year Mortgage Rate"), linewidth = 1) +
+  geom_line(data = mortgage30_filtered, aes(x = DATE, y = MORTGAGE30US, color = "30-Year Mortgage Rate"), linewidth = 1) +
+  labs(title = "Mortgage Rates (2000-2010)",
+       x = "Year",
+       y = "Mortgage Rate (%)",
+       color = "Mortgage Rate Type") +
+  scale_color_manual(values = c("15-Year Mortgage Rate" = "steelblue", "30-Year Mortgage Rate" = "darkorange")) +
+  theme_minimal() +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+mortgage_rate_plot
+
+
+# Unemployment visualization 
+ggplot(data = unemployment, aes(x = DATE, y = UNRATE)) +
+  geom_line() + # This adds a line graph
+  labs(title = "Unemployment Rate Over Time",
+       x = "Date",
+       y = "Unemployment Rate (%)") +
+  theme_minimal()
+```
+
+#### COVID Crisis
+``` {r include=FALSE}
+library(tidyverse)
+library(sf)
+library(tidyverse)
+library(usmap)
+library(gganimate)
+library(gapminder)
+library(gifski)
+```
+``` {r}
+# Focus on the years from 2019 to 2022
+Covid_crisis <- filter(economic_data, Year >= 2019 & Year <= 2022)
+
+
+# Apply region mapping
+region_mapping <- c('1' = 'Northeast', '2' = 'Midwest', '3' = 'South', '4' = 'West')
+Covid_crisis$REGION <- factor(Covid_crisis$REGION, levels = names(region_mapping), labels = region_mapping)
+glimpse(Covid_crisis)
+
+
+# Population trends during Covid 
+population_covid <- Covid_crisis[c("REGION", "Year", "Population")]
+
+# Plot population trends Covid
+population_plot_covid <- ggplot(population_covid, aes(x = Year, y = Population, color = factor(REGION))) +
+  geom_line() +
+  labs(title = "Population Trends (COVID)", y = "Population", color = "Region") +
+  theme_minimal() +
+  scale_y_continuous(labels = comma)  
+population_plot_covid
+
+# Population Percent Change during Covid 
+population_percentChange_covid <- population_covid |> 
+  group_by(REGION) |> 
+  mutate(Previous_pop = lag(Population, 1)) |>
+  mutate(Percent_Change=((Population-Previous_pop)/Previous_pop)*100) |>
+  select(-Population,-Previous_pop)
+population_percentChange_covid
+
+
+# US shape file on R
+us_map <- us_map(regions = "states") |> select(full,geom)
+
+
+# Merging All States Zillow data with US shape file 
+Zillow_2019_2023 <- All_Zillow_Longer |> 
+  group_by(STATE) |> 
+  filter(Year %in% c(2019:2023)) |>
+  inner_join(us_map, join_by('STATE'=='full'))
+
+
+# Animation of Changes in Zillow Average Home Prices during Covid 
+ggplot(Zillow_2019_2023, aes(fill=ZillowAvgHomePrice, geometry = geom)) +
+  geom_sf() +
+  transition_time(as.integer(Year)) +
+  theme(
+    axis.title = element_blank(),  
+    axis.text = element_blank(),   
+    axis.ticks = element_blank(),  
+    panel.background = element_blank(),  
+    panel.border = element_blank(),  
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),
+    legend.position = "left")+ 
+  scale_fill_continuous() +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_fill_distiller(type="div",
+                       palette="RdGy",
+                       name="Zillow Price Scale",
+                       direction=-1,
+                       labels=scales::dollar_format())  +
+  guides(color="none") +
+  labs(fill = "Zillow Price Scale",
+       caption = "Source: Zillow Home Value Index: zillow.com/data/") +
+  ggtitle("{frame_time} Zillow Average Home Price Change")
+
+
+# Population Pyramid of Single-Family Houses Sales 
+ggplot(allRegions_SalesSFH, aes(x=Year, y=SFH_Sales, fill=REGION)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  
+  facet_wrap(~REGION, scales = "free_y", labeller = labeller(REGION = c("1" = "Northeast", "2" = "Midwest", "3" = "South", "4" = "West"))) +  
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Change in Sales of Single-Family Homes: 2000 - 2023", x = "Year", y = "Number of Sales") +
+  theme_bw()+
+  theme(legend.position = "none") +
+  scale_color_date() 
+
+
+# Trend analysis over Covid years
+ggplot(Covid_crisis, aes(x = Year)) +
+  geom_line(aes(y = Consumer_Spending, color = "Consumer Spending (USD)")) +
+  geom_line(aes(y = Disposable_Income, color = "Disposable Income (USD)")) +
+  geom_line(aes(y = ZillowAvgHomePrice, color = "Home Prices (USD)")) +
+  facet_wrap(~REGION) +
+  labs(title = "Economic Indicators Over Time (COVID)", y = "Value") +
+  scale_color_manual(values = c("Consumer Spending (USD)" = "blue", 
+                                "Disposable Income (USD)" = "green", 
+                                "Home Prices (USD)" = "red")) +
+  theme_minimal() +
+  guides(color = guide_legend(title = "Indicators")) +
+  scale_y_continuous(labels = comma)  
+```
+
