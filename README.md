@@ -1,4 +1,4 @@
-Economic Drivers Of Real Estate Pricing Nationwide
+Topic: Economic Drivers Of Real Estate Pricing Nationwide
 
 Overview  
 The single-family real estate market in the United States has changed drastically since 2000, influenced by a web of different factors such as population migration, price fluctuations, and social dynamics. As the market continues to evolve, understanding these drivers becomes essential for decision-making. Our analysis aims to provide clear insights into what drives price changes in the single-family real estate market, using data on economic indicators, population estimates, and home prices. 
