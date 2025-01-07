@@ -11,21 +11,29 @@ Monirul Islam, Eric Korshun, Opal Lynch, Charles Ramirez, Jisoo Pak
 
 ### Question 1: How does population affect home prices?    
 
-Data Sources: Population estimates from the U.S. Census Bureau (2000-2023), Average home prices from the Zillow Home Value Index  
+Data Sources: 
+- Population estimates from the U.S. Census Bureau (2000-2023)
+- Average home prices from the Zillow Home Value Index  
 
-Findings: Weak correlation (0.22) between population and home prices.  
+Findings: 
+- Weak correlation (0.22) between population and home prices.  
 
 Regional trends:      
-South: High population growth (e.g., Florida: 41%, Texas: 46%) with significant price increases.  
-West: Moderate population growth with fastest price accelerations (e.g., California: 269%, Hawaii: 319%).  
+- South: High population growth (e.g., Florida: 41%, Texas: 46%) with significant price increases.  
+- West: Moderate population growth with fastest price accelerations (e.g., California: 269%, Hawaii: 319%).  
 
   
 ### Question 2: How do economic indicators relate to home prices?  
 
-Indicators Analyzed: Personal disposable income, Consumer spending   
+Indicators Analyzed: 
+- Personal disposable income
+- Consumer spending   
 
 Findings:
-Strong correlation between home prices and disposable income (0.72). Strong correlation between home prices and consumer spending (0.73). Trends suggest factors like increased buying power, speculative optimism, and the housing wealth effect.
+- Strong correlation between home prices and disposable income (0.72).
+- Strong correlation between home prices and consumer spending (0.73).
+
+Trends suggest factors like increased buying power, speculative optimism, and the housing wealth effect.
 
 
 ### Question 3: How have major events influenced the housing market?  
@@ -34,4 +42,8 @@ Strong correlation between home prices and disposable income (0.72). Strong corr
 
 COVID-19 Pandemic: Migration trends shifted toward suburban/rural areas, especially in the South. Remote work and affordability drove population growth and housing demand in the South.  
 
-Data Sources: Population Data - U.S. Census Bureau, Economic Indicators - U.S. Bureau of Economic Analysis (BEA), Home Prices - Zillow Home Value Index, Mortgage Rates - Federal Reserve Economic Data (FRED)
+Data Sources: 
+- Population Data - U.S. Census Bureau
+- Economic Indicators - U.S. Bureau of Economic Analysis (BEA)
+- Home Prices - Zillow Home Value Index
+- Mortgage Rates - Federal Reserve Economic Data (FRED)
